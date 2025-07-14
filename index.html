@@ -3,47 +3,64 @@
 <head>
   <meta charset="UTF-8">
   <title>MediaPipe Head Pose Estimation</title>
-  <!-- vision_bundle CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
-  <!-- OpenCV.js（solvePnP用） -->
-  <script src="https://docs.opencv.org/master/opencv.js"></script>
   <style>
-    video, canvas { position: absolute; width: 640px; height: 480px; }
+    body { margin: 0; overflow: hidden; }
+    video, canvas {
+      position: absolute;
+      width: 640px;
+      height: 480px;
+      transform: scaleX(-1); /* 自撮り鏡像 */
+    }
   </style>
 </head>
 <body>
-  <video id="input_video" autoplay playsinline></video>
+  <video id="input_video" autoplay playsinline muted></video>
   <canvas id="output_canvas"></canvas>
 
   <script>
-    const video = document.getElementById('input_video'), canvas = document.getElementById('output_canvas');
+    const video = document.getElementById('input_video');
+    const canvas = document.getElementById('output_canvas');
     const ctx = canvas.getContext('2d');
 
     async function init() {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.wasm");
-      const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/model/face_landmarker.task' },
-        runningMode: 'VIDEO',
-        outputFacialTransformationMatrixes: true
+      const vision = await window.FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+      );
+
+      const faceLandmarker = await window.FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/face_landmarker.task"
+        },
+        runningMode: "VIDEO",
+        outputFacialTransformationMatrixes: true,
+        numFaces: 1
       });
 
-      navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
-        video.srcObject = stream;
-        video.onloadedmetadata = () => { canvas.width = video.videoWidth; canvas.height = video.videoHeight; renderFace(); };
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
 
-      async function renderFace() {
-        ctx.drawImage(video, 0, 0);
-        const result = faceLandmarker.detectForVideo(video, performance.now());
-        if (result.faceTransformMatrixes && result.faceTransformMatrixes.length > 0) {
-          const m = result.faceTransformMatrixes[0].asMatrix(); // 4x4
-          // m の値から yaw/pitch/roll を算出（行列→Quaternion→Eulerなど）
+      video.onloadedmetadata = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        requestAnimationFrame(renderLoop);
+      };
+
+      async function renderLoop() {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const nowInMs = performance.now();
+        const result = await faceLandmarker.detectForVideo(video, nowInMs);
+
+        if (result.faceTransformMatrixes?.length) {
+          const m = result.faceTransformMatrixes[0].data;
           console.log('Matrix:', m);
+          // ↓ここで yaw/pitch/roll に変換するコードを入れたい場合、追加できます。
         }
-        requestAnimationFrame(renderFace);
+
+        requestAnimationFrame(renderLoop);
       }
     }
+
     init();
   </script>
 </body>
