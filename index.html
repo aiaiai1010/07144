@@ -1,16 +1,15 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>顔の向き推定（Yaw, Pitch, Roll）</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; }
+    body { margin: 0; overflow: hidden; background: #000; }
     video, canvas {
       position: absolute;
       width: 640px;
       height: 480px;
-      transform: scaleX(-1); /* 鏡像 */
+      transform: scaleX(-1); /* 鏡像にする */
     }
   </style>
 </head>
@@ -18,17 +17,22 @@
   <video id="input_video" autoplay playsinline muted></video>
   <canvas id="output_canvas"></canvas>
 
-  <script>
+  <script type="module">
+    import {
+      FilesetResolver,
+      FaceLandmarker
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js";
+
     const video = document.getElementById('input_video');
     const canvas = document.getElementById('output_canvas');
     const ctx = canvas.getContext('2d');
 
     async function init() {
-      const vision = await window.FilesetResolver.forVisionTasks(
+      const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
       );
 
-      const faceLandmarker = await window.FaceLandmarker.createFromOptions(vision, {
+      const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/face_landmarker.task"
         },
@@ -48,13 +52,12 @@
 
       async function renderLoop() {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const nowInMs = performance.now();
-        const result = await faceLandmarker.detectForVideo(video, nowInMs);
+
+        const result = await faceLandmarker.detectForVideo(video, performance.now());
 
         if (result.faceTransformMatrixes?.length) {
           const m = result.faceTransformMatrixes[0].data;
 
-          // 回転行列からyaw, pitch, rollを計算
           const r00 = m[0], r01 = m[1], r02 = m[2];
           const r10 = m[4], r11 = m[5], r12 = m[6];
           const r20 = m[8], r21 = m[9], r22 = m[10];
@@ -63,12 +66,15 @@
           const yaw   = Math.asin(r20) * 180 / Math.PI;
           const roll  = Math.atan2(-r10, r00) * 180 / Math.PI;
 
-          // 結果を描画
           ctx.fillStyle = 'red';
           ctx.font = '24px sans-serif';
           ctx.fillText(`Yaw: ${yaw.toFixed(1)}°`, 10, 30);
           ctx.fillText(`Pitch: ${pitch.toFixed(1)}°`, 10, 60);
           ctx.fillText(`Roll: ${roll.toFixed(1)}°`, 10, 90);
+        } else {
+          ctx.fillStyle = 'white';
+          ctx.font = '24px sans-serif';
+          ctx.fillText("顔が検出されていません", 10, 30);
         }
 
         requestAnimationFrame(renderLoop);
