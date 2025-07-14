@@ -1,87 +1,79 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>顔の向き推定（Yaw, Pitch, Roll）</title>
-  <style>
-    body { margin: 0; overflow: hidden; background: #000; }
-    video, canvas {
-      position: absolute;
-      width: 640px;
-      height: 480px;
-      transform: scaleX(-1); /* 鏡像にする */
-    }
-  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/opencv.js"></script> <!-- OpenCV.js -->
 </head>
 <body>
-  <video id="input_video" autoplay playsinline muted></video>
+  <video id="input_video" autoplay playsinline></video>
   <canvas id="output_canvas"></canvas>
 
-  <script type="module">
-    import {
-      FilesetResolver,
-      FaceLandmarker
-    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js";
-
+  <script>
     const video = document.getElementById('input_video');
     const canvas = document.getElementById('output_canvas');
     const ctx = canvas.getContext('2d');
 
-    async function init() {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
-      );
+    const faceMesh = new FaceMesh({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+    faceMesh.setOptions({maxNumFaces:1, refineLandmarks:true});
+    faceMesh.onResults(onResults);
 
-      const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/face_landmarker.task"
-        },
-        runningMode: "VIDEO",
-        outputFacialTransformationMatrixes: true,
-        numFaces: 1
-      });
+    const camera = new Camera(video, {
+      onFrame: async () => await faceMesh.send({image: video}),
+      width: 640, height: 480
+    });
+    camera.start();
 
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      video.srcObject = stream;
+    function onResults(results) {
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      video.onloadedmetadata = () => {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        requestAnimationFrame(renderLoop);
-      };
+      if (!results.multiFaceLandmarks) {ctx.restore(); return;}
+      const lm = results.multiFaceLandmarks[0];
 
-      async function renderLoop() {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // OpenCV solvePnP用の対応点（サンプル: nose tip=1, chin=152 などを選定）
+      const imagePts = cv.matFromArray(6,1,cv.CV_64FC2, [
+        lm[1].x*canvas.width, lm[1].y*canvas.height,
+        lm[152].x*canvas.width, lm[152].y*canvas.height,
+        lm[33].x*canvas.width, lm[33].y*canvas.height,
+        lm[263].x*canvas.width, lm[263].y*canvas.height,
+        lm[61].x*canvas.width, lm[61].y*canvas.height,
+        lm[291].x*canvas.width, lm[291].y*canvas.height
+      ]);
+      const modelPts = cv.matFromArray(6,1,cv.CV_64FC3, [
+        0,0,0,
+        0,-330,-65,
+        -225,170,-135,
+        225,170,-135,
+        -150,-150,-125,
+        150,-150,-125
+      ]);
+      const cameraMatrix = cv.matFromArray(3,3,cv.CV_64FC1, [f,0,cx, 0,f,cy, 0,0,1]);
+      const distCoeffs = cv.Mat.zeros(4,1,cv.CV_64FC1);
+      let rvec = new cv.Mat(), tvec = new cv.Mat();
+      cv.solvePnP(modelPts, imagePts, cameraMatrix, distCoeffs, rvec, tvec);
 
-        const result = await faceLandmarker.detectForVideo(video, performance.now());
+      // ベクトル描画
+      let noseEnd3D = cv.matFromArray(1,1,cv.CV_64FC3, [0,0,1000]);
+      let noseEnd2D = new cv.Mat();
+      cv.projectPoints(noseEnd3D, rvec, tvec, cameraMatrix, distCoeffs, noseEnd2D);
 
-        if (result.faceTransformMatrixes?.length) {
-          const m = result.faceTransformMatrixes[0].data;
+      const p1 = [lm[1].x*canvas.width, lm[1].y*canvas.height];
+      const p2 = [noseEnd2D.data64F[0], noseEnd2D.data64F[1]];
+      ctx.beginPath();
+      ctx.moveTo(...p1);
+      ctx.lineTo(...p2);
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 3;
+      ctx.stroke();
 
-          const r00 = m[0], r01 = m[1], r02 = m[2];
-          const r10 = m[4], r11 = m[5], r12 = m[6];
-          const r20 = m[8], r21 = m[9], r22 = m[10];
+      // リソース解放
+      imagePts.delete(); modelPts.delete(); cameraMatrix.delete();
+      distCoeffs.delete(); rvec.delete(); tvec.delete(); noseEnd3D.delete(); noseEnd2D.delete();
 
-          const pitch = Math.atan2(-r21, r22) * 180 / Math.PI;
-          const yaw   = Math.asin(r20) * 180 / Math.PI;
-          const roll  = Math.atan2(-r10, r00) * 180 / Math.PI;
-
-          ctx.fillStyle = 'red';
-          ctx.font = '24px sans-serif';
-          ctx.fillText(`Yaw: ${yaw.toFixed(1)}°`, 10, 30);
-          ctx.fillText(`Pitch: ${pitch.toFixed(1)}°`, 10, 60);
-          ctx.fillText(`Roll: ${roll.toFixed(1)}°`, 10, 90);
-        } else {
-          ctx.fillStyle = 'white';
-          ctx.font = '24px sans-serif';
-          ctx.fillText("顔が検出されていません", 10, 30);
-        }
-
-        requestAnimationFrame(renderLoop);
-      }
+      ctx.restore();
     }
-
-    init();
   </script>
 </body>
 </html>
