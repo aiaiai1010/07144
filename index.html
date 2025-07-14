@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>MediaPipe Head Pose Estimation</title>
+  <title>顔の向き推定（Yaw, Pitch, Roll）</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
   <style>
     body { margin: 0; overflow: hidden; }
@@ -10,7 +10,7 @@
       position: absolute;
       width: 640px;
       height: 480px;
-      transform: scaleX(-1); /* 自撮り鏡像 */
+      transform: scaleX(-1); /* 鏡像 */
     }
   </style>
 </head>
@@ -53,8 +53,22 @@
 
         if (result.faceTransformMatrixes?.length) {
           const m = result.faceTransformMatrixes[0].data;
-          console.log('Matrix:', m);
-          // ↓ここで yaw/pitch/roll に変換するコードを入れたい場合、追加できます。
+
+          // 回転行列からyaw, pitch, rollを計算
+          const r00 = m[0], r01 = m[1], r02 = m[2];
+          const r10 = m[4], r11 = m[5], r12 = m[6];
+          const r20 = m[8], r21 = m[9], r22 = m[10];
+
+          const pitch = Math.atan2(-r21, r22) * 180 / Math.PI;
+          const yaw   = Math.asin(r20) * 180 / Math.PI;
+          const roll  = Math.atan2(-r10, r00) * 180 / Math.PI;
+
+          // 結果を描画
+          ctx.fillStyle = 'red';
+          ctx.font = '24px sans-serif';
+          ctx.fillText(`Yaw: ${yaw.toFixed(1)}°`, 10, 30);
+          ctx.fillText(`Pitch: ${pitch.toFixed(1)}°`, 10, 60);
+          ctx.fillText(`Roll: ${roll.toFixed(1)}°`, 10, 90);
         }
 
         requestAnimationFrame(renderLoop);
